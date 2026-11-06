@@ -77,11 +77,18 @@ Configuration is via environmental variables.  Here's a list, along with the def
 
 Important configuration and data is kept in the container's `/etc/openvpn` directory, so this path should be mounted as a volume or a bind mount.  See the [Docker documentation](https://docs.docker.com/storage/volumes/) for more information.  In the example below, we mount it as a bind mount to a directory on the host.
 
+## Image
+
+The image is published to `ghcr.io/biezax/docker-openvpn` for `linux/amd64` and `linux/arm64`:
+
+* `latest` and `sha-<commit>`: every push to `master`
+* `X.Y.Z` and `X.Y`: release tags `vX.Y.Z`
+
+The image is published only after the build and the end-to-end smoke test (`tests/smoke.sh`) pass.
+
 ## Launching the OpenVPN daemon container:  
 
 ```
-docker build -t docker-openvpn-ng .
-
 docker run \
            --name openvpn \
            --volume /path/on/host:/etc/openvpn \
@@ -89,7 +96,7 @@ docker run \
            -p 1194:1194/udp \
            -e "OVPN_SERVER_CN=myserver.mycompany.com" \
            --cap-add=NET_ADMIN \
-           docker-openvpn-ng
+           ghcr.io/biezax/docker-openvpn:latest
 ```
 
 * `--cap-add=NET_ADMIN` is necessary; the container needs to create the tunnel device and create iptable rules.
