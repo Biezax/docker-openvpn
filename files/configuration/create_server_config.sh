@@ -22,11 +22,14 @@ client-config-dir ${OVPN_CLIENT_CONFIG_DIR}
 ca $PKI_DIR/ca.crt
 cert $PKI_DIR/issued/server.crt
 key $PKI_DIR/private/server.key
-dh $PKI_DIR/dh.pem
+dh none
+crl-verify $OPENVPN_DIR/crl.pem
 Part01
 
-# Add IP pool persistence if enabled
-if [ "${OVPN_POOL_PERSIST}" == "true" ]; then
+if [ "${OVPN_DUPLICATE_CN}" == "true" ]; then
+    echo "duplicate-cn" >> $CONFIG_FILE
+elif [ "${OVPN_POOL_PERSIST}" == "true" ]; then
+    # Pool persistence is keyed by CN and does not work with duplicate-cn
     echo "ifconfig-pool-persist ${OPENVPN_DIR}/ipp.txt" >> $CONFIG_FILE
 fi
 
@@ -83,37 +86,28 @@ persist-tun
 status $OPENVPN_DIR/openvpn-status.log
 log-append $LOG_FILE
 verb $OVPN_VERBOSITY
-# Do not force renegotiation of client
-reneg-sec 0
 Part02
 
-# Authentication configuration
-if [ "${USE_CLIENT_CERTIFICATE}" == "true" ] ; then
-    echo "# Client certificate authentication" >> $CONFIG_FILE
-    echo "verify-client-cert require" >> $CONFIG_FILE
-else
-    cat <<Part03 >>$CONFIG_FILE
-# LDAP authentication
-plugin $(dpkg-query -L openvpn | grep openvpn-plugin-auth-pam.so | head -n1) openvpn
-verify-client-cert optional
-username-as-common-name
-Part03
-fi
+echo "verify-client-cert require" >> $CONFIG_FILE
 
-# Management interface configuration
+# Management interface configuration; keep the password out of DEBUG output
+{ set +x; } 2>/dev/null
+PW_FILE="${OPENVPN_DIR}/management_pw"
+rm -f "$PW_FILE"
 if [ "${OVPN_MANAGEMENT_ENABLE}" == "true" ]; then
  if [ "${OVPN_MANAGEMENT_NOAUTH}" == "true" ]; then
   if [ "${OVPN_MANAGEMENT_PASSWORD}x" != "x" ]; then
    echo "openvpn: warning: management password is set, but authentication is disabled"
   fi
-  echo "management 0.0.0.0 5555" >> $CONFIG_FILE
+  if [ "${OVPN_MANAGEMENT_ADDRESS}" != "127.0.0.1" ]; then
+   echo "openvpn: WARNING: management interface without authentication is listening on ${OVPN_MANAGEMENT_ADDRESS}"
+  fi
+  echo "management ${OVPN_MANAGEMENT_ADDRESS} 5555" >> $CONFIG_FILE
   echo "openvpn: management interface enabled without authentication"
  else
   if [ "${OVPN_MANAGEMENT_PASSWORD}x" != "x" ]; then
-   PW_FILE="${OPENVPN_DIR}/management_pw"
-   echo "$OVPN_MANAGEMENT_PASSWORD" > $PW_FILE
-   chmod 600 $PW_FILE
-   echo "management 0.0.0.0 5555 $PW_FILE" >> $CONFIG_FILE
+   (umask 077; printf '%s\n' "$OVPN_MANAGEMENT_PASSWORD" > "$PW_FILE")
+   echo "management ${OVPN_MANAGEMENT_ADDRESS} 5555 $PW_FILE" >> $CONFIG_FILE
    echo "openvpn: management interface enabled with authentication"
   else
    echo "openvpn: warning: management password is not set, but authentication is enabled"
@@ -123,6 +117,7 @@ if [ "${OVPN_MANAGEMENT_ENABLE}" == "true" ]; then
 else
   echo "openvpn: management interface disabled"
 fi
+if [ "$DEBUG" == "true" ]; then set -x; fi
 
 # Add any extra configuration
 echo "$OVPN_EXTRA" >> $CONFIG_FILE

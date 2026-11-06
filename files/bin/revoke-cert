@@ -1,60 +1,29 @@
 #!/bin/bash
+source /opt/configuration/set_defaults.sh
 
-PKI_DIR="/etc/openvpn/pki"
-CONFIG_FILE="/opt/configuration/set_defaults.sh"
-
-# Source the configuration file
-if [ -f "$CONFIG_FILE" ]; then
-    source "$CONFIG_FILE"
-else
-    echo "Error: Configuration file not found." >&2
-    exit 1
-fi
-
-# Check if USE_CLIENT_CERTIFICATE is set to true
-if [ "$USE_CLIENT_CERTIFICATE" != "true" ]; then
-    echo "Error: Client certificates are not enabled (USE_CLIENT_CERTIFICATE is not set to 'true')." >&2
-    exit 1
-fi
-
-# Check if username is provided
 if [ -z "$1" ]; then
-    echo "Error: Username must be provided as an argument." >&2
     echo "Usage: $0 <username>" >&2
     exit 1
 fi
 
 USERNAME="$1"
+validate_client_name "$USERNAME" || exit 1
 
-# Check if the certificate exists
 if [ ! -f "$PKI_DIR/issued/$USERNAME.crt" ]; then
     echo "Error: Certificate for user '$USERNAME' not found." >&2
     exit 1
 fi
 
-# Set up EasyRSA environment
-EASYRSA_DIR="/opt/easyrsa"
-EASYCMD="$EASYRSA_DIR/easyrsa"
-source "$EASYRSA_DIR/pki_vars"
-
-# Revoke the certificate
 echo "Revoking certificate for user: $USERNAME"
-$EASYCMD revoke "$USERNAME"
-
-if [ $? -eq 0 ]; then
-    # Generate new CRL after revoking
-    echo "Generating updated Certificate Revocation List (CRL)"
-    $EASYCMD gen-crl
-    
-    # Copy the new CRL to the OpenVPN directory if it exists
-    if [ -f "$PKI_DIR/crl.pem" ]; then
-        cp "$PKI_DIR/crl.pem" "/etc/openvpn/crl.pem"
-        echo "Certificate for user '$USERNAME' has been successfully revoked."
-        echo "CRL has been updated."
-    else
-        echo "Warning: CRL generation succeeded but the file was not found in the expected location." >&2
-    fi
-else
+if ! easyrsa revoke "$USERNAME" || ! easyrsa gen-crl; then
     echo "Error: Failed to revoke certificate for user '$USERNAME'." >&2
     exit 1
 fi
+if ! install_crl; then
+    echo "Error: Failed to publish CRL; the revoked certificate may still be accepted." >&2
+    exit 1
+fi
+
+echo "Certificate for user '$USERNAME' has been revoked; new connections with it are rejected."
+echo "An already connected client is dropped at the next TLS renegotiation (within an hour)"
+echo "or when the container is restarted."

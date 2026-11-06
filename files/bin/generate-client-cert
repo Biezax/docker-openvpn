@@ -1,53 +1,29 @@
 #!/bin/bash
+source /opt/configuration/set_defaults.sh
 
-# Configuration
-PKI_DIR="/etc/openvpn/pki"
-CONFIG_FILE="/opt/configuration/set_defaults.sh"
-EASYRSA_DIR="/opt/easyrsa"
-
-# Source the configuration file
-if [ -f "$CONFIG_FILE" ]; then
-    source "$CONFIG_FILE"
-else
-    echo "Error: Configuration file not found." >&2
-    exit 1
-fi
-
-# Check if USE_CLIENT_CERTIFICATE is set to true
-if [ "$USE_CLIENT_CERTIFICATE" != "true" ]; then
-    echo "Error: Client certificates are not enabled (USE_CLIENT_CERTIFICATE is not set to 'true')." >&2
-    exit 1
-fi
-
-# Check if username is provided
 if [ -z "$1" ]; then
-    echo "Error: Username must be provided as an argument." >&2
     echo "Usage: $0 <username>" >&2
     exit 1
 fi
 
 USERNAME="$1"
+validate_client_name "$USERNAME" || exit 1
+if [[ ! "$USERNAME" =~ ^[A-Za-z0-9][A-Za-z0-9._@-]*$ ]]; then
+    echo "Error: invalid username '$USERNAME' (allowed: letters, digits, '.', '_', '@', '-')." >&2
+    exit 1
+fi
 
-# Check if the certificate already exists
 if [ -f "$PKI_DIR/issued/$USERNAME.crt" ]; then
     echo "Error: Certificate for user '$USERNAME' already exists." >&2
     echo "If you want to regenerate it, please revoke the existing certificate first." >&2
     exit 1
 fi
 
-# Set up EasyRSA environment
-EASYCMD="$EASYRSA_DIR/easyrsa"
-source "$EASYRSA_DIR/pki_vars"
-
-# Generate client certificate
-echo "Generating certificate for user: $USERNAME"
-$EASYCMD build-client-full "$USERNAME" nopass
-
-if [ $? -eq 0 ]; then
-    echo "Certificate for user '$USERNAME' has been successfully generated."
-    echo "Certificate location: $PKI_DIR/issued/$USERNAME.crt"
-    echo "Key location: $PKI_DIR/private/$USERNAME.key"
-else
+echo "Generating certificate for user: $USERNAME (valid for $CLIENT_CERT_EXPIRE days)"
+if ! easyrsa --days="$CLIENT_CERT_EXPIRE" build-client-full "$USERNAME" nopass; then
     echo "Error: Failed to generate certificate for user '$USERNAME'." >&2
     exit 1
 fi
+
+echo "Certificate for user '$USERNAME' has been successfully generated."
+echo "Get the client configuration with: show-client-config $USERNAME"

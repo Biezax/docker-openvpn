@@ -1,12 +1,6 @@
 #!/bin/bash
 source /opt/configuration/set_defaults.sh
 
-# Check if username is provided when USE_CLIENT_CERTIFICATE is true
-if [ "${USE_CLIENT_CERTIFICATE}" == "true" ] && [ -z "$1" ]; then
-    echo "Error: Username must be provided as an argument when USE_CLIENT_CERTIFICATE is true." >&2
-    exit 1
-fi
-
 USERNAME="$1"
 
 if [ ! -f "$PKI_DIR/private/server.key" ]; then
@@ -21,6 +15,17 @@ if [ ! -f "$PKI_DIR/private/server.key" ]; then
     exit 1
 fi
 
+if [ -z "$USERNAME" ]; then
+    echo "Usage: $0 <username>" >&2
+    exit 1
+fi
+validate_client_name "$USERNAME" || exit 1
+if [ ! -f "$PKI_DIR/private/${USERNAME}.key" ] || [ ! -f "$PKI_DIR/issued/${USERNAME}.crt" ] ; then
+    echo "Error: Client certificate for $USERNAME not found." >&2
+    echo "Generate it with: generate-client-cert $USERNAME" >&2
+    exit 1
+fi
+
 # Base configuration
 cat << EOF
 client
@@ -29,22 +34,9 @@ dev tun
 persist-key
 persist-tun
 remote-cert-tls server
-key-direction 1
 auth SHA512
-auth-nocache
 proto $OVPN_PROTOCOL
-reneg-sec 0
 EOF
-
-# Routes configuration
-if [ "${OVPN_ROUTES}x" == "x" ] ; then
-    echo "redirect-gateway def1"
-fi
-
-# Authentication method
-if [ "${USE_CLIENT_CERTIFICATE}" != "true" ] ; then
-    echo "auth-user-pass"
-fi
 
 # DNS configuration
 if [ "${OVPN_DNS_SERVERS}x" != "x" ] ; then
@@ -62,15 +54,13 @@ if [ "${OVPN_DNS_SERVERS}x" != "x" ] ; then
 #up /etc/openvpn/update-resolv-conf
 #down /etc/openvpn/update-resolv-conf
 EOF
-    IFS=',' read -r -a nameservers <<< "$OVPN_DNS_SERVERS"
 fi
 
 # Windows DNS registration
-if [ "${OVPN_REGISTER_DNS}" == "true" ]; then 
+if [ "${OVPN_REGISTER_DNS}" == "true" ]; then
     echo "register-dns"
-fi 
+fi
 
-# Main configuration
 cat << EOF
 # Set log file verbosity
 verb $OVPN_VERBOSITY
@@ -84,23 +74,10 @@ $(cat $PKI_DIR/ca.crt)
 $(cat $PKI_DIR/ta.key)
 </tls-auth>
 key-direction 1
-EOF
-
-# Client certificate configuration
-if [ "${USE_CLIENT_CERTIFICATE}" == "true" ] ; then
-    if [ ! -f "$PKI_DIR/private/${USERNAME}.key" ] || [ ! -f "$PKI_DIR/issued/${USERNAME}.crt" ] ; then
-        echo "Error: Client certificate for $USERNAME not found." >&2
-        echo "Please generate it using:" >&2
-        echo "docker exec /opt/easyrsa/easyrsa build-client-full $USERNAME nopass" >&2
-        exit 1
-    else 
-        cat << EOF
 <cert>
-$(cat $PKI_DIR/issued/${USERNAME}.crt)
+$(cat "$PKI_DIR/issued/${USERNAME}.crt")
 </cert>
 <key>
-$(cat $PKI_DIR/private/${USERNAME}.key)
+$(cat "$PKI_DIR/private/${USERNAME}.key")
 </key>
 EOF
-    fi
-fi

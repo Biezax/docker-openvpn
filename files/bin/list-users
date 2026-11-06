@@ -1,64 +1,28 @@
 #!/bin/bash
+source /opt/configuration/set_defaults.sh
 
-PKI_DIR="/etc/openvpn/pki"
-CONFIG_FILE="/opt/configuration/set_defaults.sh"
-
-# Source the configuration file
-if [ -f "$CONFIG_FILE" ]; then
-    source "$CONFIG_FILE"
-else
-    echo "Error: Configuration file not found." >&2
+INDEX="$PKI_DIR/index.txt"
+if [ ! -f "$INDEX" ]; then
+    echo "Error: Certificate database $INDEX not found." >&2
     exit 1
 fi
 
-if [ "$USE_CLIENT_CERTIFICATE" != "true" ]; then
-    echo "Error: Client certificates are not enabled (USE_CLIENT_CERTIFICATE is not set to 'true')." >&2
-    exit 1
-fi
+# easyrsa moves revoked certificates out of issued/, so read the CA database instead
+printf "%-20s %-8s %-17s %s\n" "USERNAME" "STATUS" "EXPIRES (UTC)" "SERIAL"
+awk -F'\t' -v now="$(date -u +%Y%m%d%H%M%S)" -v server_cn="$OVPN_SERVER_CN" '
+    {
+        cn = $6
+        sub(/.*\/CN=/, "", cn)
+        sub(/\/.*/, "", cn)
+        if (cn == "server" || cn == server_cn) next
 
-if [ ! -d "$PKI_DIR/issued" ]; then
-    echo "Error: Certificate directory not found." >&2
-    exit 1
-fi
+        # UTCTime YYMMDDHHMMSSZ or GeneralizedTime YYYYMMDDHHMMSSZ
+        expires = (length($2) == 13) ? "20" $2 : $2
+        if ($1 == "R") status = "REVOKED"
+        else if ($1 == "E" || substr(expires, 1, 14) <= now) status = "EXPIRED"
+        else status = "VALID"
 
-# Function to check if certificate is revoked
-check_cert_status() {
-    local username="$1"
-    local cert_path="$PKI_DIR/issued/$username.crt"
-    local index_path="$PKI_DIR/index.txt"
-    
-    # Get certificate serial number
-    local serial=$(openssl x509 -in "$cert_path" -noout -serial | cut -d'=' -f2)
-    
-    # Check index.txt for revocation status
-    if grep -q "^R.*$serial" "$index_path"; then
-        echo "REVOKED"
-    else
-        # Get expiration date
-        local expire_date=$(openssl x509 -in "$cert_path" -noout -enddate | cut -d'=' -f2)
-        local expire_epoch=$(date -d "$expire_date" +%s)
-        local current_epoch=$(date +%s)
-        
-        if [ $current_epoch -gt $expire_epoch ]; then
-            echo "EXPIRED"
-        else
-            echo "VALID"
-        fi
-    fi
-}
-
-# Print header
-printf "%-20s %-15s %-25s\n" "USERNAME" "STATUS" "EXPIRY DATE"
-printf "%-20s %-15s %-25s\n" "--------" "------" "------------"
-
-# List all certificates except server and CA
-for cert in "$PKI_DIR/issued"/*.crt; do
-    if [ -f "$cert" ]; then
-        username=$(basename "$cert" .crt)
-        if [ "$username" != "server" ] && [ "$username" != "ca" ]; then
-            status=$(check_cert_status "$username")
-            expire_date=$(openssl x509 -in "$cert" -noout -enddate | cut -d'=' -f2)
-            printf "%-20s %-15s %-25s\n" "$username" "$status" "$expire_date"
-        fi
-    fi
-done
+        printf "%-20s %-8s %s-%s-%s %s:%s  %s\n", cn, status,
+            substr(expires, 1, 4), substr(expires, 5, 2), substr(expires, 7, 2),
+            substr(expires, 9, 2), substr(expires, 11, 2), $4
+    }' "$INDEX"

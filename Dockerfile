@@ -1,37 +1,37 @@
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 LABEL org.opencontainers.image.authors="s.rossovskii@gmail.com"
 
-RUN apt-get update && apt-get install -y --no-install-recommends wget ca-certificates gnupg && \
+# OpenVPN comes from the upstream repository (stable channel), Ubuntu lags behind
+ADD https://swupdate.openvpn.net/repos/repo-public.gpg /etc/apt/keyrings/openvpn-repo-public.asc
+
+RUN chmod 644 /etc/apt/keyrings/openvpn-repo-public.asc && \
+    apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates && \
+    . /etc/os-release && \
+    echo "deb [signed-by=/etc/apt/keyrings/openvpn-repo-public.asc] https://build.openvpn.net/debian/openvpn/stable ${VERSION_CODENAME} main" \
+        > /etc/apt/sources.list.d/openvpn-aptrepo.list && \
+    apt-get update && \
     DEBIAN_FRONTEND=noninteractive \
     apt-get install -y --no-install-recommends \
             easy-rsa \
             fail2ban \
             ipcalc \
             iptables \
-            libpam-google-authenticator \
-            libpam-ldapd \
-            net-tools \
-            nslcd \
             openssl \
             openvpn && \
-    apt-get autoremove && \
     rm -rf /var/lib/apt/lists/* && \
     mkdir /opt/easyrsa && \
-    cp -rp /usr/share/easy-rsa/x509-types /opt/easyrsa/ && \
-    cp -rp /usr/share/easy-rsa/easyrsa /opt/easyrsa/
+    cp -rp /usr/share/easy-rsa/easyrsa /usr/share/easy-rsa/openssl-easyrsa.cnf /usr/share/easy-rsa/x509-types /opt/easyrsa/
 
 EXPOSE 1194/udp
-EXPOSE 5555/tcp
 
-ADD ./files/bin /usr/local/bin
+COPY ./files/bin /usr/local/bin
 RUN chmod a+x /usr/local/bin/*
-ADD ./files/configuration /opt/configuration
-ADD ./files/etc/pam.d/openvpn* /opt/
-ADD ./files/easyrsa/* /opt/easyrsa/
+COPY ./files/configuration /opt/configuration
+COPY ./files/easyrsa/pki_vars /opt/easyrsa/
 
 # Use a volume for data persistence
 VOLUME /etc/openvpn
 
 CMD ["/usr/local/bin/entrypoint"]
-

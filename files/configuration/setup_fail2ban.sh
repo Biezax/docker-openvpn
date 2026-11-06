@@ -20,19 +20,21 @@ EOF
 cat <<EOF > /etc/fail2ban/jail.d/openvpn.conf
 [openvpn]
 enabled  = $FAIL2BAN_ENABLED
-port     = 1194
+port     = $OVPN_PORT
 protocol = $OVPN_PROTOCOL
 filter   = openvpn
+backend  = auto
+banaction = iptables
 logpath  = $LOG_FILE
 maxretry = $FAIL2BAN_MAXRETRIES
 EOF
 
 cat <<EOF > /etc/fail2ban/fail2ban.local
 [Definition]
-logtarget = /proc/1/fd/1
+logtarget = /var/log/fail2ban.log
 EOF
 
 echo "Starting fail2ban..."
 touch /var/log/auth.log
 mkdir -p /var/run/fail2ban
-/usr/bin/fail2ban-server -xb --logtarget=stdout start
+/usr/bin/fail2ban-server -xb --logtarget=/var/log/fail2ban.log start

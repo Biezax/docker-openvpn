@@ -9,6 +9,11 @@ CONFIGFILES="/opt/configuration"
 
 source "$CONFIGFILES/set_defaults.sh"
 
+if [ "${LDAP_URI}x" != "x" ] || [ "${ENABLE_OTP}" == "true" ]; then
+  echo "WARNING: LDAP and OTP authentication have been removed, only client certificates are supported."
+  echo "WARNING: LDAP_* and ENABLE_OTP settings are ignored."
+fi
+
 echo
 echo "$(date +'%F %T') - Setting up networking..."
 echo
@@ -23,11 +28,6 @@ echo
 echo "$(date +'%F %T') - Creating configuration files..."
 echo
 
-if [ "${USE_CLIENT_CERTIFICATE}" != "true" ] ; then
-  source "$CONFIGFILES/setup_ldap.sh"
-  source "$CONFIGFILES/setup_otp.sh"
-fi 
-
 source "$CONFIGFILES/create_server_config.sh"
 
 ###
@@ -39,27 +39,11 @@ if [ "${FAIL2BAN_ENABLED}" == "true" ] ; then
   source "$CONFIGFILES/setup_fail2ban.sh"
 fi
 
-if [ "${USE_CLIENT_CERTIFICATE}" != "true" ] ; then
-echo
-echo "$(date +'%F %T') - Generating client config ..."
-echo
-echo "#---------- Start of client.ovpn ----------"
-/usr/local/bin/show-client-config
-echo "#----------  End of client.ovpn  ----------"
-
-echo
-echo "$(date +'%F %T') - Starting NSCLD... (ignore any NSS_LDAP module warnings)"
-echo
-nslcd
-fi
-
-
 echo
 echo "$(date +'%F %T') - Running OpenVPN..."
 echo
-if [ "${FAIL2BAN_ENABLED}" == "true" ] ; then
-  openvpn --daemon --config $OPENVPN_DIR/server.conf
-  exec tail -f $LOG_FILE
-else
-  exec openvpn --config $OPENVPN_DIR/server.conf
+# OpenVPN stays PID 1 so that the container stops when it dies and gets the signals
+if [ "${LOG_TO_STDOUT}" != "true" ] ; then
+  tail -n 0 -F "$LOG_FILE" &
 fi
+exec openvpn --config $OPENVPN_DIR/server.conf
